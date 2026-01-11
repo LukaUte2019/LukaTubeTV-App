@@ -7,3 +7,9 @@ A Node.js backend server that serves **TV Mediaroom-style applications** with Ne
 1. Set your PC's IP to: 172.16.40.101
 
 2. Open terminal and type: node mediaroom.js
+
+3. The server will be started on http://172.16.40.101:80
+
+4. On the IPTV STB, to open LukaTube press the Menu > Applications and press LukaTube in the list of apps
+
+5. On the IPTV STB, to open The user profile press the Menu > TV Packages > My Account. You can then search a phone number thats linked to a Lukify Music Account.
