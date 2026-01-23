@@ -6,7 +6,7 @@ A Node.js backend server that serves **TV Mediaroom-style applications** with Ne
 
 1. Set your PC's IP to: 172.16.40.101
 
-2. Go to sharing tab in the network interface propertes
+2. Go to sharing tab in the wifi network interface propertes
 
 4. Select allow other network users to connect through this computer internet connection.
 
