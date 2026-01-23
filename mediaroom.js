@@ -133,22 +133,76 @@ function buildNetflixGridFiles(filesArray, startOffset, req) {
 app.get('/Applicationlauncher/ApplicationLauncherF.aspx', (req, res) => {
   res.set('Content-Type', 'application/vnd.microsoft-tvui+xml');
   const mrml = `<?xml version="1.0" encoding="utf-8"?>
-<uidescription version="1.1">
-	<MrmlPage id="TVPage11" background="image(AppImages/pozadina.jpg)" height="720" width="1280">
-    <Panel id="TVPanel1" top="100" left="100" height="500" width="100">
-      <Button id="TVButtonTVMix" background="image(AppImages/youtube.png)" focusbackground="image(AppImages/youtube.png)" focusglow="image(AppImages/youtube.png)" fontstyle="Reg26" foreground="argb(255,0,0,0)" height="150" href="page:http://172.16.40.101/Applicationlauncher/LukaTube.aspx" left="250" top="50" width="150"></Button>
-      <Text id="TVLabel1" foreground="argb(255,226,0,116)" fontstyle="Reg32" top="115" left="600">LukaTube@MaxTV</Text>
-      <Text id="TVLabel2" fontstyle="Reg26" top="160" left="600" height="800" width="300">Гледај ги омилените видеа од LukaTube на вашиот ТВ приемник.</Text>
+<uidescription version="3.0">
+
+  <MrmlPage
+    id="TVPage11"
+    width="1280"
+    height="720"
+    background="image(AppImages/pozadina.jpg)">
+
+    <Panel
+      id="TVPanel1"
+      left="0"
+      top="0"
+      width="1280"
+      height="720">
+
+      <!-- LukaTube Button (UNCHANGED POSITION) -->
+      <Button
+        id="TVButtonTVMix"
+        left="250"
+        top="250"
+        width="150"
+        height="150"
+        background="image(AppImages/youtube.png)"
+        focusbackground="image(AppImages/youtube.png)"
+        href="page:http://172.16.40.101/Applicationlauncher/LukaTube.aspx"/>
+
+      <!-- App Store Button (SAME ROW, SAME SIZE) -->
+      <Button
+        id="TVButtonAppStore"
+        left="430"
+        top="250"
+        width="150"
+        height="150"
+        background="image(AppImages/appstore.png)"
+        focusbackground="image(AppImages/appstore.png)"
+        href="page:http://172.16.40.100/stbappstore/appstore.php"/>
+
+      <!-- Title (UNCHANGED) -->
+      <Text
+        id="TVLabel1"
+        left="600"
+        top="115"
+        fontstyle="Reg32"
+        foreground="argb(255,226,0,116)">
+        LukaTube@MaxTV
+      </Text>
+
+      <!-- Description (UNCHANGED) -->
+      <Text
+        id="TVLabel2"
+        left="600"
+        top="160"
+        width="420"
+        fontstyle="Reg26"
+        foreground="argb(255,255,255,255)">
+        Гледај ги омилените видеа од LukaTube на вашиот ТВ приемник.
+      </Text>
+
     </Panel>
+
   </MrmlPage>
-</uidescription>`;
+</uidescription>
+`;
   res.send(mrml);
 });
 // ------------------------------------------------------------------
 
 
-// ---------- DYNAMIC video list + player (remote + fallback local) with Load more ----------
 app.get('/Applicationlauncher/LukaTube.aspx', async (req, res) => {
+console.log("App started/loaded more")
   res.set({
     'Content-Type': 'application/vnd.microsoft-tvui+xml; charset=utf-8',
     'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -291,7 +345,7 @@ app.get('/Applicationlauncher/LukaTube.aspx', async (req, res) => {
         height="30"
         fontstyle="Reg26"
         foreground="argb(255,228,0,115)">
-        LukaTube - Videos ${ total ? `(showing ${offset+1}-${Math.min(offset+pageSize, total)} of ${total})` : '' }
+        LukaTube - Videos ${ total ? `(showing ${offset+1}-${Math.min(offset+pageSize, total)} of ${total}) \n {Time}` : '' }
       </Text>
       <!-- SEARCH INPUT -->
       <EditText
@@ -347,8 +401,7 @@ app.get('/Applicationlauncher/LukaTube.aspx', async (req, res) => {
 // ------------------------------------------------------------------
 
 
-// ---------- PlayVideo.aspx (renders only the player for given video_url) ----------
-app.get('/Applicationlauncher/PlayVideo.aspx', (req, res) => {
+app.get('/Applicationlauncher/YouTube.aspx', async (req, res) => {
   res.set({
     'Content-Type': 'application/vnd.microsoft-tvui+xml; charset=utf-8',
     'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -356,28 +409,158 @@ app.get('/Applicationlauncher/PlayVideo.aspx', (req, res) => {
     'Expires': '0'
   });
 
-  let videoUrl = req.query.video_url || '';
-  let videoname = req.query.video_name || '';
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  const pageSize = Math.max(1, Number(req.query.pageSize) || 12);
+  const rawSearch = (req.query.SearchYouTube || '').toString().trim();
+  const searchLower = rawSearch.toLowerCase();
+
+  // --- Fetch YouTube videos via RapidAPI ---
+  let videos = [];
   try {
-    videoUrl = decodeURIComponent(videoUrl);
-    videoUrl = videoUrl.replace(/ /g, '%20');
-  } catch (e) {
-    // leave as-is or empty
+    const response = await axios.get(
+      'https://youtube-media-downloader.p.rapidapi.com/v2/search/videos',
+      {
+        params: {
+          keyword: rawSearch || 'Rick Astley',
+          uploadDate: 'all',
+          duration: 'all',
+          sortBy: 'relevance'
+        },
+        headers: {
+          'X-RapidAPI-Host': 'youtube-media-downloader.p.rapidapi.com',
+          'X-RapidAPI-Key': 'b8d236e82cmsh17bfa10c34b5c71p104388jsn239a1ead0660'
+        },
+        timeout: 10000
+      }
+    );
+
+    const items = response.data?.items || [];
+    videos = items.map(v => ({
+      id: v.id || v.videoId || '',
+      title: v.title || 'Untitled'
+    }));
+
+  } catch (err) {
+    console.log('RapidAPI request failed:', err.message);
   }
 
-  const mrml = `<?xml version="1.0" encoding="utf-8"?>
+  // Local filter
+  if (searchLower) videos = videos.filter(v => v.title.toLowerCase().includes(searchLower));
+
+  const total = videos.length;
+  const pageVideos = videos.slice(offset, offset + pageSize);
+
+  // --- Search results text ---
+  let searchResultsText = '';
+  if (rawSearch) {
+    const escapedQuery = escapeXml(rawSearch);
+    searchResultsText = `
+      <Text
+        id="SearchResultsInfo"
+        top="100"
+        left="20"
+        width="700"
+        height="30"
+        fontstyle="Reg20"
+        foreground="argb(255,200,200,200)">
+        ${total} search result${total !== 1 ? 's' : ''} found for "${escapedQuery}"
+      </Text>
+    `;
+  }
+
+  // --- MRML generation (LukaTube list style) ---
+  let mrml = `<?xml version="1.0" encoding="utf-8"?>
 <uidescription version="3.0">
-  <MrmlPage id="PlayVideoPage" appid="lukatube.app/1.0" width="1280" height="720">
+  <MrmlPage id="YouTubeList" appid="lukatube.app/1.0" width="1280" height="720">
+
+    <Actions>
+      <Action
+        name="SearchYouTube"
+        type="submit"
+        data="SearchYouTube"
+        url="page:${req.protocol}://${req.get('host')}/Applicationlauncher/YouTube.aspx"
+        method="GET" />
+    </Actions>
+
     <Header />
-    <Panel>
-      <Video id="video" visible="true" showbusyindicator="true" width="1280" timeshiftenabled="true" timeshiftbuffersize="3600" allowtrickmodes="true" height="720" ${ videoUrl ? `tuneurl="${escapeXml(videoUrl)}"` : '' } />
-      <Text id="Main_WelcomeText" highlightcolor="argb(255,228,0,115)" margin="rect(30,20,0,0)" width="500" height="80"> Current Time: {Time} Current Date: {Date} \n ${replaceUnderscoreWithSpace(escapeXml(videoname))}</Text>
+
+    <Panel id="MainPanel" left="0" top="0" width="1280" height="720">
+
+      <Text
+        id="Title"
+        top="10"
+        left="20"
+        width="900"
+        height="30"
+        fontstyle="Reg26"
+        foreground="argb(255,228,0,115)">
+        YouTube - Videos ${ total ? `(showing ${offset+1}-${Math.min(offset+pageSize, total)} of ${total})` : '' }
+      </Text>
+
+      <EditText
+        id="SearchYouTube"
+        top="50"
+        left="20"
+        width="400"
+        height="40"
+        visible="true"
+        hint="Search videos..."
+        value="${escapeXml(rawSearch)}" />
+
+      <Button
+        id="SearchButton"
+        top="50"
+        left="430"
+        width="140"
+        height="40"
+        justification="center">
+        <Text>Search YouTube</Text>
+        <Actions>
+          <Event type="onclick" action="SearchYouTube"/>
+        </Actions>
+      </Button>
+
+      ${searchResultsText}
+      
+      <Panel id="VideoList" top="${rawSearch ? 140 : 100}" left="20" width="1240" height="580">
+`;
+
+  // --- Add video title buttons only ---
+  pageVideos.forEach((v, i) => {
+    const top = 10 + i * 50;
+    mrml += `
+        <Button id="videoBtn${i}" top="${top}" left="0" width="1240" height="40"
+                href="page:${req.protocol}://${req.get('host')}/Applicationlauncher/PlayYouTubeVideo.aspx?videoId=${encodeURIComponent(v.id)}">
+          <Text top="0" left="10" width="1220" height="40" fontstyle="Reg22" foreground="argb(255,255,255,255)">
+            ${escapeXml(v.title)}
+          </Text>
+        </Button>
+    `;
+  });
+
+  // --- Load more button ---
+  const nextOffset = offset + pageSize;
+  if (nextOffset < total) {
+    const nextUrl = `${req.protocol}://${req.get('host')}/Applicationlauncher/YouTube.aspx?offset=${nextOffset}&pageSize=${pageSize}${rawSearch ? `&SearchYouTube=${encodeURIComponent(rawSearch)}` : ''}`;
+    mrml += `
+      <Panel id="loadmorePanel" width="1200" height="80" top="${10 + pageVideos.length * 50}" left="40">
+        <Button id="loadMoreBtn" top="10" left="0" width="600" height="40" fontstyle="Reg26" 
+          href="page:${escapeXml(nextUrl)}">
+          <Text top="0" left="8" width="584" height="40">Load more videos...</Text>
+        </Button>
+      </Panel>
+    `;
+  }
+
+  mrml += `
+      </Panel>
     </Panel>
   </MrmlPage>
 </uidescription>`;
+
   res.send(mrml);
 });
-// ------------------------------------------------------------------
+
 
 
 app.get('/24ti/default.aspx', (req, res) => {
@@ -385,21 +568,21 @@ app.get('/24ti/default.aspx', (req, res) => {
 
   const mrml = `<?xml version="1.0" encoding="utf-8"?>
 <uidescription version="3.0">
-	<MrmlPage id="tvPage" background="image(Images/BackgroundWide.jpg)" width="853" inanimations="PageInForward">
+    <MrmlPage id="tvPage" background="image(Images/BackgroundWide.jpg)" width="853" inanimations="PageInForward">
     <Panel id="ContainerPanel" left="106" height="480" width="640">
       <VerticalFlowPanel id="Main_Panel" top="70" left="20">
         <Text id="Main_WelcomeText" highlightcolor="argb(255,228,0,115)" margin="rect(30,10,0,0)" height="120" width="500">
-				Lukify@MaxTV
+                Lukify@MaxTV
                 Welcome to Mediaroom!
-				</Text>
+                </Text>
         <HorizontalFlowPanel id="Main_BillsMenu_MenuPanel" margin="rect(0,20,0,0)">
           <DataSource id="Main_BillsMenu_SystemDataSource" uri="local://system-info" />
-          <EditText id="DeviceGuid" visible="false" datasource="{Binding Source=Main_BillsMenu_SystemDataSource,Path=DeviceId}"></EditText>
+          <EditText id="DeviceGuid" visible="true" datasource="{Binding Source=Main_BillsMenu_SystemDataSource,Path=DeviceId}"></EditText>
           <Button id="OpenLukaTube" justification="center" margin="rect(10,0,0,0)" width="140" href="page:http://172.16.40.101/Applicationlauncher/LukaTube.aspx">
-						Open LukaTube
+                        Open LukaTube
             </Button>
             <Button id="ViewRequestHeaders" justification="center" margin="rect(10,0,0,0)" width="140" href="page:http://172.16.40.101/IPTVRequestHeaders/RequestHeaders.aspx">
-						View request headers
+                        View request headers
             </Button>
             <Actions><Event type="onclick" action="NavigateTelephone" /></Actions>
           <Actions>
@@ -410,7 +593,7 @@ app.get('/24ti/default.aspx', (req, res) => {
         </HorizontalFlowPanel>
       </VerticalFlowPanel>
     </Panel>
-	</MrmlPage>
+    </MrmlPage>
 </uidescription>`;
 
   res.send(mrml);
@@ -710,6 +893,1062 @@ playlistsMRML += `
 
   res.send(mrml);
 });
+
+
+// ---------- PlayVideo.aspx (renders only the player for given video_url) ----------
+app.get('/Applicationlauncher/PlayVideo.aspx', async (req, res) => {
+
+  // ---------- LOG VIDEO INFO ----------
+  console.log(
+    "Video started playing on IPTV STB",
+    req.get("user-agent"),
+    "Video Name:",
+    replaceUnderscoreWithSpace(req.query.video_name || '')
+  );
+
+  res.set({
+    'Content-Type': 'application/vnd.microsoft-tvui+xml; charset=utf-8',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+
+  const remoteBase = 'http://172.16.40.100/youtubeclone/videos_mediaroom/';
+  const videoDirFs = path.join(__dirname, 'youtubeclone', 'videos_mediaroom');
+  let files = [];
+
+  // ---------- REMOTE ----------
+  const fetchFn = getFetch();
+  if (fetchFn) {
+    try {
+      const r = await fetchFn(remoteBase);
+      if (r && r.ok) {
+        const text = await r.text();
+        const re = /href\s*=\s*["']([^"']+\.(mp4|m4v|mov))["']/gi;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+          const abs = new URL(m[1], remoteBase).href;
+          if (!files.includes(abs)) files.push(abs);
+        }
+      }
+    } catch {}
+  }
+
+  // ---------- LOCAL FALLBACK ----------
+  if (files.length === 0 && fs.existsSync(videoDirFs)) {
+    const localFiles = fs.readdirSync(videoDirFs)
+      .filter(f => /\.(mp4|m4v|mov)$/i.test(f))
+      .sort();
+
+    files = localFiles.map(f =>
+      `${req.protocol}://${req.get('host')}/youtubeclone/videos_mediaroom/${encodeURIComponent(f)}`
+    );
+  }
+
+  // ---------- CURRENT VIDEO ----------
+  let videoUrl = req.query.video_url || '';
+  let videoName = req.query.video_name || '';
+  try {
+    videoUrl = decodeURIComponent(videoUrl).replace(/ /g, '%20');
+  } catch {}
+
+  const idx = files.indexOf(videoUrl);
+
+  // ---------- PREV / NEXT ----------
+  const prevVideo = files.length > 1 ? files[(idx - 1 + files.length) % files.length] : '';
+  const nextVideo = files.length > 1 ? files[(idx + 1) % files.length] : '';
+
+  const prevName = prevVideo
+    ? decodeURIComponent(prevVideo.split('/').pop()).replace(/\.(mp4|m4v|mov)$/i, '')
+    : '';
+
+  const nextName = nextVideo
+    ? decodeURIComponent(nextVideo.split('/').pop()).replace(/\.(mp4|m4v|mov)$/i, '')
+    : '';
+
+  const prevUrl = prevVideo
+    ? `${req.protocol}://${req.get('host')}/Applicationlauncher/PlayVideo.aspx?video_url=${encodeURIComponent(prevVideo)}&video_name=${encodeURIComponent(prevName)}`
+    : '';
+
+  const nextUrl = nextVideo
+    ? `${req.protocol}://${req.get('host')}/Applicationlauncher/PlayVideo.aspx?video_url=${encodeURIComponent(nextVideo)}&video_name=${encodeURIComponent(nextName)}`
+    : '';
+
+  // ---------- MRML ----------
+  const mrml = `<?xml version="1.0" encoding="utf-8"?>
+<uidescription version="3.0">
+  <MrmlPage id="PlayVideoPage" appid="lukatube.app/1.0" width="1280" height="720">
+
+    <Header />
+
+    <!-- Actions -->
+    <Actions>
+    ${nextUrl ? `<Event type="onkey:channelup" action="scriptChannel3Up"/>` : ''}
+  ${prevUrl ? `<Event type="onkey:channeldown" action="scriptChannel1Down"/>` : ''}
+      <!-- CHANNEL UP / DOWN -->
+      ${nextUrl ? `<Action name="scriptChannel3Up" type="script" function="channelUpPlay" data="${escapeXml(nextUrl)}"/>` : ''}
+      ${prevUrl ? `<Action name="scriptChannel1Down" type="script" function="channelDownPlay" data="${escapeXml(prevUrl)}"/>` : ''}
+
+      <!-- Video end auto-play -->
+      ${nextUrl ? `<Action name="autoPlayNext" type="script" function="playNextVideo" data="${escapeXml(nextUrl)}"/>` : ''}
+
+      <!-- Exit app -->
+      <Action name="scriptExit" type="script" function="handleAppLeave"/>
+
+    </Actions>
+
+     <Scripts>
+    <Script>
+    <![CDATA[
+      function setVideo(url) {
+        if (!url) return;
+
+        // Stop current playback
+        video.SetProperty("tuneurl", "");
+
+        // Tune to new LukaTube video
+        video.SetProperty("tuneurl", url);
+      }
+
+      function channelUpPlay(nextUrl) {
+        setVideo(nextUrl);
+      }
+
+      function channelDownPlay(prevUrl) {
+        setVideo(prevUrl);
+      }
+
+      function playNextVideo(nextUrl) {
+        setVideo(nextUrl);
+      }
+
+      function handleAppLeave() {
+        Application.Exit();
+      }
+    ]]>
+  </Script>
+  </Scripts>
+
+
+    <Panel>
+
+      <!-- VIDEO -->
+      <Video
+        id="video"
+        width="1280"
+        height="720"
+        visible="true"
+        showbusyindicator="true"
+        allowtrickmodes="true"
+        timeshiftenabled="true"
+        timeshiftbuffersize="3600"
+        tuneurl="${escapeXml(videoUrl)}">
+      </Video>
+
+      <!-- INFO TEXT -->
+      <Text
+        id="Main_WelcomeText"
+        highlightcolor="argb(255,228,0,115)"
+        margin="rect(30,20,0,0)"
+        width="500"
+        height="80">
+        Current Time: {Time} Current Date: {Date}
+        Device info: ${req.get("user-agent")}
+        Video Name: ${replaceUnderscoreWithSpace(escapeXml(videoName))}
+      </Text>
+
+      <!-- PREV BUTTON (LEFT HALF CENTERED) -->
+      ${prevUrl ? `<Button
+        id="PrevButton"
+        top="640"
+        left="160"
+        width="300"
+        height="60"
+        focusable="true"
+        href="page:${escapeXml(prevUrl)}"
+        background="argb(0,0,0,0)">
+        <Text alignment="center" justification="center" fontstyle="Reg20" foreground="argb(255,255,255,255)">
+          PREV: ${replaceUnderscoreWithSpace(escapeXml(prevName))}
+        </Text>
+      </Button>` : ''}
+
+      <!-- NEXT BUTTON (RIGHT HALF CENTERED) -->
+      ${nextUrl ? `<Button
+        id="NextButton"
+        top="640"
+        left="880"
+        width="300"
+        height="60"
+        focusable="true"
+        href="page:${escapeXml(nextUrl)}"
+        background="argb(0,0,0,0)">
+        <Text alignment="center" justification="center" fontstyle="Reg20" foreground="argb(255,255,255,255)">
+          NEXT: ${replaceUnderscoreWithSpace(escapeXml(nextName))}
+        </Text>
+      </Button>` : ''}
+
+    </Panel>
+  </MrmlPage>
+</uidescription>`;
+
+  res.send(mrml);
+});
+
+
+
+// ---------- Mini Web Browser with CSS positions & clickable labels as buttons
+//              (UL/OL rendered horizontally; preserves same page layout)
+app.get('/Applicationlauncher/WebBrowser.aspx', async (req, res) => {
+  const axios = require('axios');
+  const cheerio = require('cheerio');
+  const os = require('os');
+  const http = require('http');
+  const https = require('https');
+
+  const escapeXmlLocal = (typeof escapeXml === 'function') ? escapeXml : (s => {
+    if (!s) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  });
+
+  res.set({
+    'Content-Type': 'application/vnd.microsoft-tvui+xml; charset=utf-8',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+
+  // --- URL handling ---
+  let url = (req.query.BrowserUrl || req.query.url || '').toString().trim();
+  if (!url) url = 'https://mail.baucentar.com.mk/';
+  if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+
+  // --- get local IP ---
+  let localIp = '';
+  const nets = os.networkInterfaces();
+  for (const n of Object.keys(nets)) {
+    const lname = n.toLowerCase();
+    if (lname.includes('ethernet 4') || lname.includes('eth4') || lname.includes('ethernet4')) {
+      for (const net of nets[n]) {
+        if (net.family === 'IPv4' && !net.internal) { localIp = net.address; break; }
+      }
+    }
+    if (localIp) break;
+  }
+  if (!localIp) {
+    for (const n of Object.keys(nets)) {
+      for (const net of nets[n]) {
+        if (net.family === 'IPv4' && !net.internal) { localIp = net.address; break; }
+      }
+      if (localIp) break;
+    }
+  }
+  if (!localIp) localIp = '0.0.0.0';
+
+  // --- fetch HTML ---
+  let pageHtml = '';
+  try {
+    const agent = url.startsWith('https://')
+      ? new https.Agent({ localAddress: localIp, rejectUnauthorized: false })
+      : new http.Agent({ localAddress: localIp });
+
+    const r = await axios.get(url, { httpAgent: agent, httpsAgent: agent, timeout: 15000, maxRedirects: 5 });
+    pageHtml = r && r.data ? String(r.data) : '';
+  } catch (err) {
+    pageHtml = `<html><head><title>Load error</title></head><body><h1>Fetch failed</h1><p>${escapeXmlLocal(err && (err.message || String(err)))}</p></body></html>`;
+  }
+
+  const $ = cheerio.load(pageHtml, { decodeEntities: false });
+  const ROOT = $('body').first().length ? $('body').first() : $.root();
+
+  // --- helpers ---
+  function resolveUrl(href) {
+    if (!href) return '';
+    try { return new URL(href, url).href; }
+    catch (e) { return href; }
+  }
+
+  function parseStylePosition(style) {
+    const pos = { top: 0, left: 0, width: 0, height: 0 };
+    if (!style) return pos;
+    // allow style to be object or string
+    const s = (typeof style === 'string') ? style : '';
+    const topMatch = s.match(/top\s*:\s*([\d.]+)px/i);
+    const leftMatch = s.match(/left\s*:\s*([\d.]+)px/i);
+    const widthMatch = s.match(/width\s*:\s*([\d.]+)px/i);
+    const heightMatch = s.match(/height\s*:\s*([\d.]+)px/i);
+    if (topMatch) pos.top = parseFloat(topMatch[1]);
+    if (leftMatch) pos.left = parseFloat(leftMatch[1]);
+    if (widthMatch) pos.width = parseFloat(widthMatch[1]);
+    if (heightMatch) pos.height = parseFloat(heightMatch[1]);
+    return pos;
+  }
+
+  function isInlineNode(node) {
+    const tag = (node.name || '').toLowerCase();
+    if (!tag) return false;
+    const inlineTags = new Set(['a','img','span','b','strong','i','em','small','sub','sup']);
+    return inlineTags.has(tag);
+  }
+
+  // --- collect blocks ---
+  const blocks = [];
+
+  function collect(node) {
+    if (!node) return;
+    if (node.type === 'text') {
+      const t = $(node).text().trim();
+      if (t) blocks.push({ type: 'paragraph', text: t, style: $(node).parent().attr('style') || '' });
+      return;
+    }
+    const tag = (node.name || '').toLowerCase();
+
+    // Block elements
+    if (['p','div','section','article','header','main','footer'].includes(tag)) {
+      const children = $(node).contents().toArray();
+      const total = children.length;
+      let inlineCount = 0;
+      let nonEmptyTextCount = 0;
+      for (const ch of children) {
+        if (ch.type === 'text') {
+          if ($(ch).text().trim()) nonEmptyTextCount++;
+        } else if (isInlineNode(ch)) inlineCount++;
+      }
+      const style = $(node).attr('style') || '';
+
+      if (inlineCount >= 2 || (inlineCount > 0 && nonEmptyTextCount > 0 && total <= 6)) {
+        // horizontal group
+        const items = [];
+        for (const ch of children) {
+          if (ch.type === 'text') {
+            const t = $(ch).text().trim();
+            if (t) items.push({ kind: 'text', text: t, style: $(ch).parent().attr('style') || '' });
+          } else {
+            const cname = (ch.name || '').toLowerCase();
+            if (cname === 'img') items.push({ kind: 'img', src: resolveUrl($(ch).attr('src') || ''), alt: $(ch).attr('alt') || '', style: $(ch).attr('style') || '' });
+            else if (cname === 'a') {
+              const href = resolveUrl($(ch).attr('href') || '');
+              const txt = $(ch).text().trim() || href;
+              items.push({ kind: 'link', href, text: txt, style: $(ch).attr('style') || '' });
+            } else {
+              const txt = $(ch).text().trim();
+              if (txt) items.push({ kind: 'text', text: txt, style: $(ch).attr('style') || '' });
+            }
+          }
+        }
+        blocks.push({ type: 'hgroup', items, style });
+      } else {
+        const text = $(node).text().trim();
+        if (text) blocks.push({ type: 'paragraph', text, style });
+        $(node).find('img').each((i, im) => blocks.push({ type: 'image', src: resolveUrl($(im).attr('src') || ''), alt: $(im).attr('alt') || '', style: $(im).attr('style') || '' }));
+        $(node).find('a').each((i, a) => {
+          const href = resolveUrl($(a).attr('href') || '');
+          const txt = $(a).text().trim() || href;
+          blocks.push({ type: 'link', text: txt, href: `${req.protocol}://${req.get('host')}/Applicationlauncher/WebBrowser.aspx?url=${href}`, style: $(a).attr('style') || '' });
+        });
+      }
+      return;
+    }
+
+    // Headings
+    if (['h1','h2','h3'].includes(tag)) {
+      const txt = $(node).text().trim();
+      if (txt) blocks.push({ type: 'heading', level: tag, text: txt, style: $(node).attr('style') || '' });
+      return;
+    }
+
+    // Lists -> render horizontally (one hgroup representing the list)
+    if (tag === 'ul' || tag === 'ol') {
+      const listStyle = $(node).attr('style') || '';
+      const items = [];
+      $(node).children('li').each((i, li) => {
+        const $li = $(li);
+        // inside each li, look for a, img or text - keep a single item per li (if more, concatenate)
+        const link = $li.find('a').first();
+        if (link.length) {
+          const href = resolveUrl(link.attr('href') || '');
+          const txt = link.text().trim() || href;
+          items.push({ kind: 'link', href, text: txt, style: $li.attr('style') || link.attr('style') || '' });
+          return;
+        }
+        const img = $li.find('img').first();
+        if (img.length) {
+          items.push({ kind: 'img', src: resolveUrl(img.attr('src') || ''), alt: img.attr('alt') || '', style: $li.attr('style') || img.attr('style') || '' });
+          return;
+        }
+        // fallback: plain text inside li (trim and collapse whitespace)
+        const t = $li.text().trim();
+        if (t) items.push({ kind: 'text', text: t, style: $li.attr('style') || '' });
+      });
+      // push as horizontal group but mark as list so we can style differently if needed
+      if (items.length) blocks.push({ type: 'hgroup', items, style: listStyle });
+      return;
+    }
+
+    // Images
+    if (tag === 'img') {
+      blocks.push({ type: 'image', src: resolveUrl($(node).attr('src') || ''), alt: $(node).attr('alt') || '', style: $(node).attr('style') || '' });
+      return;
+    }
+
+    // Links & clickable labels (anything with onclick)
+    if (tag === 'a' || $(node).attr('onclick')) {
+      const href = resolveUrl($(node).attr('href') || '');
+      const txt = $(node).text().trim() || href;
+      blocks.push({ type: 'link', text: txt, href: href ? `${req.protocol}://${req.get('host')}/Applicationlauncher/WebBrowser.aspx?url=${href}` : '', style: $(node).attr('style') || '' });
+      return;
+    }
+
+    // Fallback: walk children
+    $(node).children().each((i, ch) => collect(ch));
+  }
+
+  ROOT.children().each((i, child) => collect(child));
+
+  const MAX = 120;
+  const render = blocks.slice(0, MAX);
+
+  const currentUrlEsc = escapeXmlLocal(url);
+  const title = escapeXmlLocal($('title').first().text().trim() || url);
+  const goAction = `${req.protocol}://${req.get('host')}/Applicationlauncher/WebBrowser.aspx`;
+
+  // --- Build MRML ---
+  let mrml = `<?xml version="1.0" encoding="utf-8"?>
+<uidescription version="3.0">
+  <MrmlPage id="MiniWebBrowser" appid="lukatube.app/1.0" width="1280" height="720">
+    <Header />
+    <Panel left="0" top="0" width="1280" height="720">
+      <Panel top="0" left="0" width="1280" height="88">
+        <Text top="10" left="20" width="760" height="28" fontstyle="Reg22" foreground="argb(255,228,0,115)">${title}</Text>
+        <EditText id="BrowserUrl" top="44" left="20" width="960" height="30" value="${currentUrlEsc}" hint="Enter URL..." />
+        <Button id="BrowserGo" top="44" left="990" width="120" height="30" justification="center">
+          <Text>Go</Text>
+          <Actions><Event type="onclick" action="BrowseGo"/></Actions>
+        </Button>
+        <Actions>
+          <Action name="BrowseGo" type="submit" data="BrowserUrl" url="page:${escapeXmlLocal(goAction)}" method="GET" />
+        </Actions>
+      </Panel>
+`;
+
+  for (const b of render) {
+    const pos = parseStylePosition(b.style || '');
+    const top = pos.top || 0;
+    const left = pos.left || 0;
+    const width = pos.width || 1200;
+    const height = pos.height || 30;
+
+    if (b.type === 'heading') {
+      const style = b.level === 'h1' ? 'Reg28' : (b.level === 'h2' ? 'Reg24' : 'Reg22');
+      mrml += `<Panel top="${top}" left="${left}" width="${width}" height="${height}"><Text width="100%" height="100%" fontstyle="${style}" foreground="argb(255,255,255,255)">${escapeXmlLocal(b.text)}</Text></Panel>\n`;
+    } else if (b.type === 'paragraph') {
+      mrml += `<Panel top="${top}" left="${left}" width="${width}" height="${height}"><Text width="100%" height="100%" fontstyle="Reg20">${escapeXmlLocal(b.text)}</Text></Panel>\n`;
+    } else if (b.type === 'image') {
+      if (b.src) mrml += `<Panel top="${top}" left="${left}" width="${width}" height="${height}"><Image width="100%" height="100%" src="${escapeXmlLocal(b.src)}" /></Panel>\n`;
+    } else if (b.type === 'link') {
+      mrml += `<Panel top="${top}" left="${left}" width="${width}" height="${height}"><Button width="100%" height="100%" href="${escapeXmlLocal(b.href)}"><Text>${escapeXmlLocal(b.text)}</Text></Button></Panel>\n`;
+    } else if (b.type === 'listitem') {
+      // kept for backwards compatibility, but ul/ol are now emitted as hgroup
+      mrml += `<Panel top="${top}" left="${left}" width="${width}" height="${height}"><Text width="100%" height="100%" fontstyle="Reg18">• ${escapeXmlLocal(b.text)}</Text></Panel>\n`;
+    } else if (b.type === 'hgroup') {
+      // horizontal group using absolute positioning inside the Panel
+      // distribute widths: if items have no explicit widths, split container width evenly
+      mrml += `<Panel top="${top}" left="${left}" width="${width}" height="${height}">\n`;
+      // determine if items have explicit widths
+      let explicitWidths = false;
+      const itPoss = b.items.map(it => parseStylePosition(it.style || ''));
+      for (const ip of itPoss) if (ip.width && ip.width > 0) explicitWidths = true;
+
+      let defaultItemWidth = 100;
+      if (!explicitWidths && b.items.length > 0 && width > 0) {
+        // leave small spacing between items (10px)
+        const totalSpacing = Math.max(0, b.items.length - 1) * 10;
+        defaultItemWidth = Math.max(60, Math.floor((width - totalSpacing) / b.items.length));
+      }
+
+      let xOffset = 0;
+      for (let idx = 0; idx < b.items.length; idx++) {
+        const it = b.items[idx];
+        const itPos = itPoss[idx] || { top:0,left:0,width:0,height:0 };
+        const itLeft = xOffset + (itPos.left || 0);
+        const itTop = itPos.top || 0;
+        const itWidth = (itPos.width && itPos.width > 0) ? itPos.width : defaultItemWidth;
+        const itHeight = (itPos.height && itPos.height > 0) ? itPos.height : height;
+
+        if (it.kind === 'img') {
+          mrml += `<Panel top="${itTop}" left="${itLeft}" width="${itWidth}" height="${itHeight}"><Image width="100%" height="100%" src="${escapeXmlLocal(it.src)}" /></Panel>\n`;
+        } else if (it.kind === 'text') {
+          mrml += `<Panel top="${itTop}" left="${itLeft}" width="${itWidth}" height="${itHeight}"><Text width="100%" height="100%" fontstyle="Reg20">${escapeXmlLocal(it.text)}</Text></Panel>\n`;
+        } else if (it.kind === 'link') {
+          // clickable list item -> render as button (horizontal)
+          const hrefEsc = it.href ? `${req.protocol}://${req.get('host')}/Applicationlauncher/WebBrowser.aspx?url=${escapeXmlLocal(it.href)}` : '';
+          // If it.href already contains full URL we must ensure it isn't double-wrapped - original code used full redirect URL earlier.
+          // We preserve the same pattern: use the prebuilt it.href if present.
+          const btnHref = it.href ? it.href : '';
+          mrml += `<Panel top="${itTop}" left="${itLeft}" width="${itWidth}" height="${itHeight}"><Button width="100%" height="100%" href="${escapeXmlLocal(btnHref)}"><Text>${escapeXmlLocal(it.text)}</Text></Button></Panel>\n`;
+        }
+        xOffset += itWidth + 10; // spacing
+      }
+      mrml += `</Panel>\n`;
+    }
+  }
+
+  mrml += `</Panel></MrmlPage></uidescription>`;
+  res.send(mrml);
+});
+
+
+
+
+const os = require('os');
+
+app.get('/Applicationlauncher/PlayYouTubeVideo.aspx', async (req, res) => {
+  res.set({
+    'Content-Type': 'application/vnd.microsoft-tvui+xml; charset=utf-8',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+
+  const defaultVideoId = 'dQw4w9WgXcQ';
+  const videoId = req.query.videoId || defaultVideoId;
+
+  const videosFolder = path.join(__dirname, 'youtubeclone', 'videos_mediaroom');
+  if (!fs.existsSync(videosFolder)) fs.mkdirSync(videosFolder, { recursive: true });
+
+  const localFile = path.join(videosFolder, `${videoId}.mp4`);
+  let videoname = `Video_${videoId}`;
+
+  try {
+    if (!fs.existsSync(localFile)) {
+      console.log('Downloading video from RapidAPI:', videoId);
+
+      const fetch = require('node-fetch');
+      const https = require('https');
+
+      // ---------- RapidAPI ----------
+      const rapidUrl =
+        `https://youtube-media-downloader.p.rapidapi.com/v2/video/details` +
+        `?videoId=${videoId}&urlAccess=normal&videos=auto&audios=auto`;
+
+      const rapidResp = await fetch(rapidUrl, {
+        headers: {
+          'x-rapidapi-host': 'youtube-media-downloader.p.rapidapi.com',
+          'x-rapidapi-key': 'b8d236e82cmsh17bfa10c34b5c71p104388jsn239a1ead0660'
+        }
+      });
+
+      const data = await rapidResp.json();
+      if (!data?.videos?.items?.length) {
+        throw new Error('No videos returned from RapidAPI');
+      }
+
+      const videoItem =
+        data.videos.items.find(v => v.hasAudio) || data.videos.items[0];
+
+      const remoteVideoUrl = videoItem.url;
+      videoname = data.title || videoname;
+
+      // ---------- GET IP FROM OS (Ethernet 4) ----------
+      const nets = os.networkInterfaces();
+      let localIP = null;
+
+      for (const name of Object.keys(nets)) {
+        if (name.toLowerCase() === 'ethernet 4') {
+          for (const net of nets[name]) {
+            if (net.family === 'IPv4' && !net.internal) {
+              localIP = net.address;
+            }
+          }
+        }
+      }
+
+      console.log('Download via:', localIP || 'default interface');
+
+      // ---------- DOWNLOAD (handles 302 once) ----------
+      await new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(localFile);
+
+        const startRequest = (url) => {
+          const r = https.get(url, {
+            localAddress: localIP || undefined,
+            timeout: 60000
+          }, (resp) => {
+
+            // handle redirect
+            if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
+              resp.resume();
+              return startRequest(resp.headers.location);
+            }
+
+            if (resp.statusCode !== 200) {
+              reject(new Error('HTTP ' + resp.statusCode));
+              return;
+            }
+
+            resp.pipe(file);
+            file.on('finish', () => file.close(resolve));
+          });
+
+          r.on('error', reject);
+        };
+
+        startRequest(remoteVideoUrl);
+      });
+
+      console.log('Downloaded:', localFile);
+    } else {
+      console.log('Video already exists locally:', localFile);
+    }
+  } catch (err) {
+    console.error('Error fetching RapidAPI video:', err);
+
+    // ---------- FALLBACK ----------
+    const fallbackPath = path.join(videosFolder, 'fallback.mp4');
+    if (fs.existsSync(fallbackPath)) {
+      fs.copyFileSync(fallbackPath, localFile);
+    }
+    videoname = 'Fallback Video';
+  }
+
+  const videoUrl =
+    `${req.protocol}://${req.get('host')}/youtubeclone/videos_mediaroom/` +
+    encodeURIComponent(path.basename(localFile));
+
+  const mrml = `<?xml version="1.0" encoding="utf-8"?>
+<uidescription version="3.0">
+  <MrmlPage id="YouTubePage" appid="lukatube.app/1.0" width="1280" height="720">
+    <Header />
+    <Panel>
+      <Video id="video" visible="true" showbusyindicator="true"
+             width="1280" height="720"
+             timeshiftenabled="true" timeshiftbuffersize="3600"
+             allowtrickmodes="true"
+             tuneurl="${videoUrl}" />
+      <Text id="VideoInfo" highlightcolor="argb(255,228,0,115)"
+            margin="rect(30,20,0,0)" width="800" height="80">
+        Video Name: ${videoname}
+        \n Current Time: {Time} Current Date: {Date}
+        \n Device: ${req.get('user-agent')}
+      </Text>
+    </Panel>
+  </MrmlPage>
+</uidescription>`;
+
+  res.send(mrml);
+});
+
+const axios = require('axios');
+
+// Helper: get IPv4 address of Ethernet 4
+function getEthernet4IP() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    const lname = name.toLowerCase();
+    if (lname.includes('ethernet 4') || lname.includes('eth4') || lname.includes('ethernet4')) {
+      for (const net of nets[name]) {
+        if (net.family === 'IPv4' && !net.internal) {
+          return net.address;
+        }
+      }
+    }
+  }
+  return null; // not found
+}
+
+
+function getEthernet4Ip() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    if (name.toLowerCase().includes('ethernet 4')) {
+      for (const net of nets[name]) {
+        if (net.family === 'IPv4' && !net.internal) return net.address;
+      }
+    }
+  }
+  return null;
+}
+
+
+
+app.get('/Applicationlauncher/YouTube.aspx', async (req, res) => {
+  res.set({
+    'Content-Type': 'application/vnd.microsoft-tvui+xml; charset=utf-8',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  const pageSize = Math.max(1, Number(req.query.pageSize) || 12);
+  const rawSearch = (req.query.SearchYouTube || '').toString().trim();
+  const searchLower = rawSearch.toLowerCase();
+
+  // --- Fetch YouTube videos via RapidAPI ---
+  let videos = [];
+  try {
+    const response = await axios.get(
+      'https://youtube-media-downloader.p.rapidapi.com/v2/search/videos',
+      {
+        params: {
+          keyword: rawSearch || 'Rick Astley',
+          uploadDate: 'all',
+          duration: 'all',
+          sortBy: 'relevance'
+        },
+        headers: {
+          'X-RapidAPI-Host': 'youtube-media-downloader.p.rapidapi.com',
+          'X-RapidAPI-Key': 'b8d236e82cmsh17bfa10c34b5c71p104388jsn239a1ead0660'
+        },
+        timeout: 10000
+      }
+    );
+
+    const items = response.data?.items || [];
+    videos = items.map(v => ({
+        id: v.id || v.videoId || '',
+        title: v.title || 'Untitled'
+    }));
+
+  } catch (err) {
+    console.log('RapidAPI request failed:', err.message);
+  }
+
+  // Local filter
+  if (searchLower) videos = videos.filter(v => v.title.toLowerCase().includes(searchLower));
+
+  const total = videos.length;
+  const pageVideos = videos.slice(offset, offset + pageSize);
+
+  // --- Build MRML in LukaTube list style ---
+  let mrml = `<?xml version="1.0" encoding="utf-8"?>
+<uidescription version="3.0">
+  <MrmlPage id="YouTubeList" appid="lukatube.app/1.0" width="1280" height="720">
+    <Header />
+    <Actions>
+      <Action
+        name="SearchYouTube"
+        type="submit"
+        data="SearchYouTube"
+        url="page:${req.protocol}://${req.get('host')}/Applicationlauncher/YouTube.aspx"
+        method="GET" />
+    </Actions>
+    <Panel id="MainPanel" top="0" left="0" width="1280" height="720">
+      <Text id="Title" top="10" left="20" width="900" height="30" fontstyle="Reg26" foreground="argb(255,228,0,115)">
+        YouTube - Videos ${ total ? `(showing ${offset+1}-${Math.min(offset+pageSize, total)} of ${total})` : '' }
+      </Text>
+      <EditText
+        id="SearchYouTube"
+        top="50"
+        left="20"
+        width="400"
+        height="40"
+        hint="Search YouTube..."
+        value="${escapeXml(rawSearch)}" />
+      <Button id="SearchButton" top="50" left="430" width="140" height="40" justification="center">
+        <Text>Search</Text>
+        <Actions>
+          <Event type="onclick" action="SearchYouTube"/>
+        </Actions>
+      </Button>
+      ${rawSearch ? `
+      <Text
+        id="SearchResultsInfo"
+        top="100"
+        left="20"
+        width="700"
+        height="30"
+        fontstyle="Reg20"
+        foreground="argb(255,200,200,200)">
+        ${total} search result${total !== 1 ? 's' : ''} found for "${escapeXml(rawSearch)}"
+      </Text>` : ''}
+      <Panel id="VideoList" top="${rawSearch ? 140 : 100}" left="20" width="1240" height="580">
+`;
+
+  // --- Add video title buttons only (no thumbnail) ---
+  pageVideos.forEach((v, i) => {
+    const top = 10 + i * 50; // each button 50px tall
+    mrml += `
+        <Button id="videoBtn${i}" top="${top}" left="0" width="1240" height="40"
+                href="page:${req.protocol}://${req.get('host')}/Applicationlauncher/PlayYouTubeVideo.aspx?videoId=${encodeURIComponent(v.id)}">
+          <Text top="0" left="10" width="1220" height="40" fontstyle="Reg22" foreground="argb(255,255,255,255)">
+            ${escapeXml(v.title)}
+          </Text>
+        </Button>
+    `;
+  });
+
+  // --- Load more button ---
+  const nextOffset = offset + pageSize;
+  if (nextOffset < total) {
+    const nextUrl = `${req.protocol}://${req.get('host')}/Applicationlauncher/YouTube.aspx?offset=${nextOffset}&pageSize=${pageSize}${rawSearch ? `&SearchYouTube=${encodeURIComponent(rawSearch)}` : ''}`;
+    mrml += `
+      <Button id="loadMoreBtn" top="${10 + pageVideos.length * 50}" left="470" width="300" height="40" href="page:${nextUrl}">
+        <Text>Load more videos...</Text>
+      </Button>
+    `;
+  }
+
+  mrml += `
+      </Panel>
+    </Panel>
+  </MrmlPage>
+</uidescription>`;
+
+  res.send(mrml);
+});
+
+app.get('/Applicationlauncher/LukifyVideos.aspx', async (req, res) => {
+  res.set({
+    'Content-Type': 'application/vnd.microsoft-tvui+xml; charset=utf-8',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+
+  const hostAbsolute = 'http://172.16.40.101'; // истиот host
+  const feedUrl = 'http://172.16.40.100/social_feed.php';
+
+  let feed = { posts: [], page: 1, limit: 10, total_posts: 0, has_more: false };
+
+  const page = Math.max(1, Number(req.query.page || 1));
+  const limit = Math.max(1, Number(req.query.pageSize || 10));
+  const rawSearch = (req.query.SearchLukaTube || '').toString().trim().toLowerCase();
+
+  try {
+    const fetchFn = getFetch();
+    if (fetchFn) {
+      const r = await fetchFn(`${feedUrl}?page=${page}&limit=${limit}${rawSearch ? `&SearchLukaTube=${encodeURIComponent(rawSearch)}` : ''}`);
+      if (r.ok) feed = await r.json();
+    }
+  } catch(e) {
+    console.error('Failed to fetch feed:', e);
+  }
+
+  const posts = feed.posts || [];
+  const totalPosts = feed.total_posts || posts.length;
+  const hasMore = feed.has_more === true;
+
+  let mrml = `<?xml version="1.0" encoding="utf-8"?>
+<uidescription version="3.0">
+  <MrmlPage id="LukifyVideosList" appid="lukatube.app/1.0" width="1280" height="720">
+    <Header />
+    <Panel id="MainPanel" left="0" top="0" width="1280" height="720">
+
+      <Text
+        id="Title"
+        top="10"
+        left="20"
+        width="900"
+        height="30"
+        fontstyle="Reg26"
+        foreground="argb(255,228,0,115)">
+        Lukify Videos ${totalPosts ? `(page ${page}, showing ${posts.length} of ${totalPosts})` : ''}
+      </Text>
+`;
+
+  let topOffset = 50;
+
+  for (let post of posts) {
+    const userName = escapeXml(stripEmojis(post.user?.full_name || post.user?.username || 'Unknown'));
+    const caption = escapeXml(stripEmojis(post.caption || 'No title'));
+
+    let videoUrl = post.video_url || '';
+    if (!videoUrl || videoUrl === 'not found') continue;
+    videoUrl = videoUrl.replace(/https?:\/\/lukaserver\.ddns\.net/gi, 'http://172.16.40.100');
+
+    let videoId;
+    try {
+      videoId = encodeURIComponent(Buffer.from(videoUrl).toString('base64'));
+    } catch (err) {
+      console.error('Base64 encode error', err, videoUrl);
+      continue;
+    }
+
+    const playUrl = `${hostAbsolute}/Applicationlauncher/PlayLukifyVideo.aspx?videoId=${videoId}`;
+
+    // Song info
+    let songText = '';
+    if (post.song) {
+      const songTitle = escapeXml(post.song.title || 'Unknown song');
+      const songArtist = escapeXml(post.song.artist || 'Unknown artist');
+      songText = ` (Song: ${songTitle} by ${songArtist})`;
+    }
+
+    // Profile picture
+    const profilePic = post.user?.profile_picture_url ? `<Image top="5" left="0" width="50" height="50" src="${post.user.profile_picture_url}" />` : '';
+    const buttonLeft = post.user?.profile_picture_url ? 60 : 0;
+    const buttonWidth = post.user?.profile_picture_url ? 1180 : 1240;
+    const textWidth = post.user?.profile_picture_url ? 1112 : 1224;
+
+    mrml += `
+  <Panel top="${topOffset}" left="20" width="1240" height="60">
+    ${profilePic}
+    <Button top="0" left="${buttonLeft}" width="${buttonWidth}" height="50" href="page:${playUrl}">
+      <Text top="0" left="8" width="${textWidth}" height="50">
+       Caption: ${caption}${songText} by ${userName}
+      </Text>
+    </Button>
+  </Panel>
+    `;
+    topOffset += 70;
+  }
+
+  // Load more button
+  if (hasMore) {
+    const nextPage = page + 1;
+    const nextUrl = `${hostAbsolute}/Applicationlauncher/LukifyVideos.aspx?page=${nextPage}&pageSize=${limit}${rawSearch ? `&SearchLukaTube=${encodeURIComponent(rawSearch)}` : ''}`;
+
+    mrml += `
+      <Panel id="loadmorePanel" width="1200" height="80" top="${topOffset + 10}" left="40">
+        <Button id="loadMoreBtn" top="10" left="0" width="600" height="40" fontstyle="Reg26" 
+          href="page:${escapeXml(nextUrl)}">
+          <Text top="0" left="8" width="584" height="40">Load more videos...</Text>
+        </Button>
+      </Panel>
+    `;
+  }
+
+  mrml += `
+    </Panel>
+  </MrmlPage>
+</uidescription>`;
+
+  res.send(mrml);
+
+  // ---------------- HELPERS ----------------
+  function escapeXml(unsafe) {
+    return String(unsafe || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function stripEmojis(str) {
+    return str.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
+  }
+});
+
+
+
+
+app.get('/Applicationlauncher/PlayLukifyVideo.aspx', (req, res) => {
+  const videoId = req.query.videoId || '';
+  if (!videoId) {
+    return res.status(400).send('Missing videoId');
+  }
+
+  let videoUrl = '';
+  try {
+    // decode base64
+    videoUrl = Buffer.from(videoId, 'base64').toString('utf8');
+  } catch (e) {
+    return res.status(400).send('Invalid videoId');
+  }
+
+  // MRML page to play video
+  const mrml = `<?xml version="1.0" encoding="utf-8"?>
+<uidescription version="3.0">
+  <MrmlPage id="PlayVideoPage" appid="lukatube.app/1.0" width="1280" height="720">
+
+    <Header />
+
+    <!-- Actions -->
+    <Actions>
+
+      <!-- Exit app -->
+      <Action name="scriptExit" type="script" function="handleAppLeave"/>
+
+    </Actions>
+
+     <Scripts>
+    <Script>
+    <![CDATA[
+      function setVideo(url) {
+        if (!url) return;
+
+        // Stop current playback
+        video.SetProperty("tuneurl", "");
+
+        // Tune to new LukaTube video
+        video.SetProperty("tuneurl", url);
+      }
+
+      function channelUpPlay(nextUrl) {
+        setVideo(nextUrl);
+      }
+
+      function channelDownPlay(prevUrl) {
+        setVideo(prevUrl);
+      }
+
+      function playNextVideo(nextUrl) {
+        setVideo(nextUrl);
+      }
+
+      function handleAppLeave() {
+        Application.Exit();
+      }
+    ]]>
+  </Script>
+  </Scripts>
+
+
+    <Panel>
+
+      <!-- VIDEO -->
+      <Video
+        id="video"
+        width="1280"
+        height="720"
+        visible="true"
+        showbusyindicator="true"
+        allowtrickmodes="true"
+        timeshiftenabled="true"
+        timeshiftbuffersize="3600"
+        tuneurl="${escapeXml(videoUrl)}">
+      </Video>
+
+      <!-- INFO TEXT -->
+      <Text
+        id="Main_WelcomeText"
+        highlightcolor="argb(255,228,0,115)"
+        margin="rect(30,20,0,0)"
+        width="500"
+        height="80">
+        Current Time: {Time} Current Date: {Date}
+        Device info: ${req.get("user-agent")}
+      </Text>
+
+    </Panel>
+  </MrmlPage>
+</uidescription>`;
+
+  res.set({
+    'Content-Type': 'application/vnd.microsoft-tvui+xml; charset=utf-8',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+  res.send(mrml);
+
+  function escapeXml(unsafe) {
+    return String(unsafe || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+});
+
+
 
 
 app.listen(port, () => {
